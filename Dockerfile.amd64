@@ -1,0 +1,29 @@
+FROM messense/rust-musl-cross:x86_64-musl as build
+
+ARG binary_path=/home/rust/src/target/x86_64-unknown-linux-musl/release
+ARG binary=expiry-hawk
+ARG full_binary=${binary_path}/${binary}
+RUN mkdir src; echo 'fn main() { panic!("Dummy Image Called!")}' > ./src/main.rs
+COPY ["Cargo.toml", "Cargo.lock",  "./"]
+RUN cargo build --release
+COPY src src
+
+#need to break the cargo cache
+RUN touch ./src/main.rs
+
+RUN cargo build --release; musl-strip ${full_binary}
+
+FROM scratch
+
+ARG binary_path=/home/rust/src/target/x86_64-unknown-linux-musl/release
+ARG binary=expiry-hawk
+ARG full_binary=${binary_path}/${binary}
+ARG workdir=/app/bin
+
+WORKDIR ${workdir}
+
+COPY --from=build /etc/passwd /etc/passwd
+COPY --from=build /etc/group /etc/group
+COPY --from=build ${full_binary} .
+USER nobody:nogroup
+ENTRYPOINT ["/app/bin/expiry-hawk"]
