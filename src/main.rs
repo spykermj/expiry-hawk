@@ -28,20 +28,20 @@ lazy_static! {
         register_int_gauge_vec!("expiry_hawk_secret_expiry_time", "The time this secret expires", &["namespace", "name", "kind"]).unwrap();
 
     static ref HTTP_COUNTER: Counter = register_counter!(opts!(
-        "example_http_requests_total",
+        "expiry_hawk_http_requests_total",
         "Number of HTTP requests made.",
-        labels! {"handler" => "all",}
+        labels! {"handler" => "metrics",}
     ))
     .unwrap();
     static ref HTTP_BODY_GAUGE: Gauge = register_gauge!(opts!(
-        "example_http_response_size_bytes",
+        "expiry_hawk_http_response_size_bytes",
         "The HTTP response sizes in bytes.",
-        labels! {"handler" => "all",}
+        labels! {"handler" => "metrics",}
     ))
     .unwrap();
 
     static ref HTTP_REQ_HISTOGRAM: HistogramVec = register_histogram_vec!(
-        "example_http_request_duration_seconds",
+        "expiry_hawk_http_request_duration_seconds",
         "The HTTP request latencies in seconds.",
         &["handler"]
     )
@@ -52,7 +52,7 @@ async fn serve_req(_req: Request<Body>) -> Result<Response<Body>, hyper::Error> 
     let encoder = TextEncoder::new();
 
     HTTP_COUNTER.inc();
-    let timer = HTTP_REQ_HISTOGRAM.with_label_values(&["all"]).start_timer();
+    let timer = HTTP_REQ_HISTOGRAM.with_label_values(&["metrics"]).start_timer();
 
     let metric_families = prometheus::gather();
     let mut buffer = vec![];
@@ -80,13 +80,18 @@ async fn scan_deployments() -> anyhow::Result<()> {
         let expiry_time_annotation = "spykerman.co.uk/secret-expiry-time";
         if event.annotations().contains_key(rotation_time_annotation) {
             let namespace = event.namespace().unwrap();
-            let timestamp = DateTime::parse_from_rfc3339(event.annotations().get(rotation_time_annotation).unwrap()).unwrap();
-            SECRET_ROTATION_TIME.with_label_values(&[&namespace, &event.name_any(), "deployment"]).set(timestamp.timestamp_millis())
+            let rfc3339 = event.annotations().get(rotation_time_annotation).unwrap();
+            if let Ok(timestamp) = DateTime::parse_from_rfc3339(&rfc3339) {
+                SECRET_ROTATION_TIME.with_label_values(&[&namespace, &event.name_any(), "deployment"]).set(timestamp.timestamp_millis())
+            } else {
+                println!("failed to parse as rfc3339: {}", rfc3339)
+            }
         }
         if event.annotations().contains_key(expiry_time_annotation) {
             let namespace = event.namespace().unwrap();
-            let timestamp = DateTime::parse_from_rfc3339(event.annotations().get(expiry_time_annotation).unwrap()).unwrap();
-            SECRET_EXPIRY_TIME.with_label_values(&[&namespace, &event.name_any(), "deployment"]).set(timestamp.timestamp_millis())
+            if let Ok(timestamp) = DateTime::parse_from_rfc3339(event.annotations().get(expiry_time_annotation).unwrap()) {
+                SECRET_EXPIRY_TIME.with_label_values(&[&namespace, &event.name_any(), "deployment"]).set(timestamp.timestamp_millis())
+            }
         }
     }
     Ok(())
@@ -94,7 +99,7 @@ async fn scan_deployments() -> anyhow::Result<()> {
 
 async fn serve_metrics() -> anyhow::Result<()>{
     let addr = ([0, 0, 0, 0], 9898).into();
-    println!("Listening on http://{}", addr);
+    println!("Metrics server listening on http://{}", addr);
 
     let serve_future = Server::bind(&addr).serve(make_service_fn(|_| async {
         Ok::<_, hyper::Error>(service_fn(serve_req))
