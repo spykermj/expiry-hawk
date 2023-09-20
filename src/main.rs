@@ -25,13 +25,13 @@ lazy_static! {
     static ref SECRET_ROTATION_TIME: IntGaugeVec = register_int_gauge_vec!(
         "expiry_hawk_secret_rotation_time",
         "The time this secret can be rotated",
-        &["namespace", "name", "kind"]
+        &["namespace", "name", "kind", "affected_url"]
     )
     .unwrap();
     static ref SECRET_EXPIRY_TIME: IntGaugeVec = register_int_gauge_vec!(
         "expiry_hawk_secret_expiry_time",
         "The time this secret expires",
-        &["namespace", "name", "kind"]
+        &["namespace", "name", "kind", "affected_url"]
     )
     .unwrap();
     static ref HTTP_COUNTER: Counter = register_counter!(opts!(
@@ -90,6 +90,10 @@ fn get_rotation_annotation() -> String {
 
 fn get_expiry_annotation() -> String {
     "spykerman.co.uk/secret-expiry-time".to_string()
+}
+
+fn get_affected_url_annotation() -> String {
+    "spykerman.co.uk/secret-affected-url".to_string()
 }
 
 async fn serve_metrics() -> anyhow::Result<()> {
@@ -164,6 +168,10 @@ async fn handle_events<K: Resource<DynamicType = ApiResource> + Clone + Send + '
     let mut items = stream.applied_objects().boxed();
     while let Some(resource) = items.try_next().await? {
         if let Some(ns) = resource.namespace() {
+            let url = match resource.annotations().get(&get_affected_url_annotation()) {
+                Some(url) => url,
+                None => "url_not_provided",
+            };
             if resource
                 .annotations()
                 .contains_key(&get_rotation_annotation())
@@ -179,7 +187,7 @@ async fn handle_events<K: Resource<DynamicType = ApiResource> + Clone + Send + '
                     .unwrap();
                 if let Ok(timestamp) = DateTime::parse_from_rfc3339(rfc3339) {
                     SECRET_ROTATION_TIME
-                        .with_label_values(&[&ns, &resource.name_any(), &K::kind(ar)])
+                        .with_label_values(&[&ns, &resource.name_any(), &K::kind(ar), url])
                         .set(timestamp.timestamp_millis())
                 } else {
                     error!(
@@ -205,7 +213,7 @@ async fn handle_events<K: Resource<DynamicType = ApiResource> + Clone + Send + '
                     .unwrap();
                 if let Ok(timestamp) = DateTime::parse_from_rfc3339(rfc3339) {
                     SECRET_EXPIRY_TIME
-                        .with_label_values(&[&ns, &resource.name_any(), &K::kind(ar)])
+                        .with_label_values(&[&ns, &resource.name_any(), &K::kind(ar), url])
                         .set(timestamp.timestamp_millis())
                 } else {
                     error!(
