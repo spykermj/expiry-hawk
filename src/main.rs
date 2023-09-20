@@ -1,23 +1,23 @@
-use futures::{pin_mut, TryStreamExt, try_join};
-use k8s_openapi::api::apps::v1::Deployment;
-use kube::{
-    api::{Api, ResourceExt},
-    runtime::{watcher, WatchStreamExt},
-    Client,
-};
-
-use chrono::DateTime;
-
 use prometheus::{Counter, Encoder, Gauge, HistogramVec, TextEncoder, IntGaugeVec};
+use prometheus::{labels, opts, register_counter, register_gauge, register_histogram_vec, register_int_gauge_vec};
 
 use lazy_static::lazy_static;
-use prometheus::{labels, opts, register_counter, register_gauge, register_histogram_vec, register_int_gauge_vec};
 
 use hyper::{
     header::CONTENT_TYPE,
     service::{make_service_fn, service_fn},
     Body, Request, Response, Server,
 };
+
+use chrono::DateTime;
+
+use futures::{try_join, Stream, StreamExt, TryStreamExt};
+use kube::{
+    api::{Api, ApiResource, DynamicObject, GroupVersionKind, Resource, ResourceExt},
+    runtime::{metadata_watcher, watcher, watcher::Event, WatchStreamExt},
+};
+
+use tracing::*;
 
 lazy_static! {
     static ref SECRET_ROTATION_TIME: IntGaugeVec =
@@ -70,36 +70,23 @@ async fn serve_req(_req: Request<Body>) -> Result<Response<Body>, hyper::Error> 
     Ok(response)
 }
 
-async fn scan_deployments() -> anyhow::Result<()> {
-    let client = Client::try_default().await?;
-    let api = Api::<Deployment>::all(client);
-    let stream = watcher(api, watcher::Config::default()).applied_objects();
-    pin_mut!(stream);
-    while let Some(event) = stream.try_next().await? {
-        let rotation_time_annotation = "spykerman.co.uk/secret-rotation-time";
-        let expiry_time_annotation = "spykerman.co.uk/secret-expiry-time";
-        if event.annotations().contains_key(rotation_time_annotation) {
-            let namespace = event.namespace().unwrap();
-            let rfc3339 = event.annotations().get(rotation_time_annotation).unwrap();
-            if let Ok(timestamp) = DateTime::parse_from_rfc3339(&rfc3339) {
-                SECRET_ROTATION_TIME.with_label_values(&[&namespace, &event.name_any(), "deployment"]).set(timestamp.timestamp_millis())
-            } else {
-                println!("failed to parse as rfc3339: {}", rfc3339)
-            }
-        }
-        if event.annotations().contains_key(expiry_time_annotation) {
-            let namespace = event.namespace().unwrap();
-            if let Ok(timestamp) = DateTime::parse_from_rfc3339(event.annotations().get(expiry_time_annotation).unwrap()) {
-                SECRET_EXPIRY_TIME.with_label_values(&[&namespace, &event.name_any(), "deployment"]).set(timestamp.timestamp_millis())
-            }
-        }
-    }
-    Ok(())
+enum Kind {
+   Deployment,
+   StatefulSet,
+   DaemonSet,
+}
+
+fn get_rotation_annotation() -> String {
+    "spykerman.co.uk/secret-rotation-time".to_string()
+}
+
+fn get_expiry_annotation() -> String {
+    "spykerman.co.uk/secret-expiry-time".to_string()
 }
 
 async fn serve_metrics() -> anyhow::Result<()>{
     let addr = ([0, 0, 0, 0], 9898).into();
-    println!("Metrics server listening on http://{}", addr);
+    info!("Metrics server listening on http://{}", addr);
 
     let serve_future = Server::bind(&addr).serve(make_service_fn(|_| async {
         Ok::<_, hyper::Error>(service_fn(serve_req))
@@ -111,15 +98,82 @@ async fn serve_metrics() -> anyhow::Result<()>{
     Ok(())
 }
 
-async fn scan_and_serve() -> anyhow::Result<((),())> {
-    let scan_fut = scan_deployments();
-    let serve_fut = serve_metrics();
-    try_join!(scan_fut, serve_fut)
-}
-
 #[tokio::main]
 async fn main() {
+    init_tracing();
     if let Err(err) = scan_and_serve().await {
-        eprintln!("error running expiry-hawk: {}", err)
+        error!("error running expiry-hawk: {}", err)
     }
+}
+
+fn init_tracing() {
+    let subscriber = tracing_subscriber::FmtSubscriber::builder()
+    .with_max_level(Level::INFO)
+    .finish();
+    tracing::subscriber::set_global_default(subscriber)
+    .expect("setting default subscriber failed");
+}
+
+async fn scan_and_serve() -> anyhow::Result<((),(),(),())> {
+    let serve_fut = serve_metrics();
+    let watch_statefulset = watch_metadata(Kind::StatefulSet);
+    let watch_deployment = watch_metadata(Kind::Deployment);
+    let watch_daemonset = watch_metadata(Kind::DaemonSet);
+    try_join!(serve_fut, watch_deployment, watch_statefulset, watch_daemonset)
+}
+
+async fn watch_metadata(resource: Kind) -> anyhow::Result<()> {
+    let kind = match resource {
+        Kind::DaemonSet => "DaemonSet",
+        Kind::Deployment => "Deployment",
+        Kind::StatefulSet => "StatefulSet",
+    };
+    let group = "apps";
+    let version = "v1";
+    let client = kube::Client::try_default().await?;
+
+    // Turn them into a GVK
+    let gvk = GroupVersionKind::gvk(group, version, kind);
+    // Use API discovery to identify more information about the type (like its plural)
+    let (ar, _caps) = kube::discovery::pinned_kind(&client, &gvk).await?;
+
+    // Use the full resource info to create an Api with the ApiResource as its DynamicType
+    let api = Api::<DynamicObject>::all_with(client, &ar);
+    let wc = watcher::Config::default();
+
+    // Start a metadata or a full resource watch
+    handle_events(metadata_watcher(api, wc), &ar).await
+}
+
+async fn handle_events<
+    K: Resource<DynamicType = ApiResource> + Clone + Send + 'static,
+>(
+    stream: impl Stream<Item = watcher::Result<Event<K>>> + Send + 'static,
+    ar: &ApiResource,
+) -> anyhow::Result<()> {
+    let mut items = stream.applied_objects().boxed();
+    while let Some(p) = items.try_next().await? {
+        if let Some(ns) = p.namespace() {
+            if p.annotations().contains_key(&get_rotation_annotation()) {
+                info!("saw {} {} in {ns}", K::kind(ar), p.name_any());
+                let rfc3339 = p.annotations().get(&get_rotation_annotation()).unwrap();
+                if let Ok(timestamp) = DateTime::parse_from_rfc3339(rfc3339) {
+                    SECRET_ROTATION_TIME.with_label_values(&[&ns, &p.name_any(), &K::kind(ar)]).set(timestamp.timestamp_millis())
+                } else {
+                  error!("{} {} in {ns} failed to parse as rfc3339: {}", K::kind(ar), &p.name_any(), rfc3339)
+                }
+            }
+            if p.annotations().contains_key(&get_expiry_annotation()) {
+                let rfc3339 = p.annotations().get(&get_expiry_annotation()).unwrap();
+                if let Ok(timestamp) = DateTime::parse_from_rfc3339(rfc3339) {
+                    SECRET_EXPIRY_TIME.with_label_values(&[&ns, &p.name_any(), &K::kind(ar)]).set(timestamp.timestamp_millis())
+                } else {
+                  error!("{} {} in {ns} failed to parse as rfc3339: {}", K::kind(ar), &p.name_any(), rfc3339)
+                }
+            }
+        } else {
+            info!("saw {} {}", K::kind(ar), p.name_any());
+        }
+    }
+    Ok(())
 }
