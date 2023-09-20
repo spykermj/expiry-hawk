@@ -155,7 +155,7 @@ async fn handle_events<
     while let Some(p) = items.try_next().await? {
         if let Some(ns) = p.namespace() {
             if p.annotations().contains_key(&get_rotation_annotation()) {
-                info!("saw {} {} in {ns}", K::kind(ar), p.name_any());
+                info!("parsing rotation time for {} {} in {ns}", K::kind(ar), p.name_any());
                 let rfc3339 = p.annotations().get(&get_rotation_annotation()).unwrap();
                 if let Ok(timestamp) = DateTime::parse_from_rfc3339(rfc3339) {
                     SECRET_ROTATION_TIME.with_label_values(&[&ns, &p.name_any(), &K::kind(ar)]).set(timestamp.timestamp_millis())
@@ -164,6 +164,7 @@ async fn handle_events<
                 }
             }
             if p.annotations().contains_key(&get_expiry_annotation()) {
+                info!("parsing expiry time for {} {} in {ns}", K::kind(ar), p.name_any());
                 let rfc3339 = p.annotations().get(&get_expiry_annotation()).unwrap();
                 if let Ok(timestamp) = DateTime::parse_from_rfc3339(rfc3339) {
                     SECRET_EXPIRY_TIME.with_label_values(&[&ns, &p.name_any(), &K::kind(ar)]).set(timestamp.timestamp_millis())
@@ -171,8 +172,6 @@ async fn handle_events<
                   error!("{} {} in {ns} failed to parse as rfc3339: {}", K::kind(ar), &p.name_any(), rfc3339)
                 }
             }
-        } else {
-            info!("saw {} {}", K::kind(ar), p.name_any());
         }
     }
     Ok(())
