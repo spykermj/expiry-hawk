@@ -3,8 +3,9 @@ kind: Deployment
 metadata:
   name: {{ include "expiry-hawk.fullname" . }}
   annotations:
-    spykerman.co.uk/secret-rotation-time: "2023-09-18T19:11:28Z"
-    spykerman.co.uk/secret-expiry-time: "2023-10-18T19:11:28Z"
+    spykerman.co.uk/secret-rotation-time: {{ now | mustDateModify "1440h" | date "2006-01-02T15:04:05Z" }}
+    spykerman.co.uk/secret-expiry-time: {{ now | mustDateModify "2160h" | date "2006-01-02T15:04:05Z" }}
+    spykerman.co.uk/secret-affected-url: "https://example.com"
   labels:
     {{- include "expiry-hawk.labels" . | nindent 4 }}
 spec:

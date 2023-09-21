@@ -188,7 +188,7 @@ async fn handle_events<K: Resource<DynamicType = ApiResource> + Clone + Send + '
                 if let Ok(timestamp) = DateTime::parse_from_rfc3339(rfc3339) {
                     SECRET_ROTATION_TIME
                         .with_label_values(&[&ns, &resource.name_any(), &K::kind(ar), url])
-                        .set(timestamp.timestamp_millis())
+                        .set(timestamp.timestamp())
                 } else {
                     error!(
                         "{} {} in {ns} failed to parse as rfc3339: {}",
@@ -214,7 +214,7 @@ async fn handle_events<K: Resource<DynamicType = ApiResource> + Clone + Send + '
                 if let Ok(timestamp) = DateTime::parse_from_rfc3339(rfc3339) {
                     SECRET_EXPIRY_TIME
                         .with_label_values(&[&ns, &resource.name_any(), &K::kind(ar), url])
-                        .set(timestamp.timestamp_millis())
+                        .set(timestamp.timestamp())
                 } else {
                     error!(
                         "{} {} in {ns} failed to parse as rfc3339: {}",
