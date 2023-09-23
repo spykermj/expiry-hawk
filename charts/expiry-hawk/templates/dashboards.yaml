@@ -6,7 +6,7 @@ metadata:
     grafana_dashboard: "1"
     {{- include "expiry-hawk.labels" . | nindent 4 }}
 data:
-  dashboard.json: |
+  expiry-hawk.json: |
     {
       "annotations": {
         "list": [
@@ -27,6 +27,7 @@ data:
       "editable": false,
       "fiscalYearStartMonth": 0,
       "graphTooltip": 0,
+      "id": null,
       "links": [],
       "liveNow": false,
       "panels": [
@@ -67,16 +68,17 @@ data:
             "overrides": []
           },
           "gridPos": {
-            "h": 8,
-            "w": 12,
+            "h": 5,
+            "w": 8,
             "x": 0,
             "y": 0
           },
-          "id": null,
+          "id": 1,
+          "maxPerRow": 3,
           "options": {
             "colorMode": "value",
             "graphMode": "area",
-            "justifyMode": "auto",
+            "justifyMode": "center",
             "orientation": "auto",
             "reduceOptions": {
               "calcs": [
@@ -88,6 +90,8 @@ data:
             "textMode": "auto"
           },
           "pluginVersion": "9.5.5",
+          "repeat": "namespace",
+          "repeatDirection": "h",
           "targets": [
             {
               "datasource": {
@@ -95,19 +99,21 @@ data:
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "floor((expiry_hawk_secret_expiry_time{name=\"expiry-hawk\", namespace=\"expiry-hawk\"} - time())/60/60/24)",
+              "exemplar": false,
+              "expr": "floor((sum without (job, pod, container, instance, service, endpoint) (expiry_hawk_secret_expiry_time{namespace=\"$namespace\"} - time())/60/60/24))",
               "instant": true,
+              "interval": "",
               "key": "Q-f3c4d28c-2e3c-4087-8020-1e394bdc8b97-0",
-              "legendFormat": "__auto",
+              "legendFormat": "{{`{{name}}`}} affected_url: {{`{{affected_url}}`}}",
               "range": true,
               "refId": "A"
             }
           ],
-          "title": "Secret Expiry",
+          "title": "namespace - $namespace",
           "type": "stat"
         }
       ],
-      "refresh": "",
+      "refresh": "5m",
       "schemaVersion": 38,
       "style": "dark",
       "tags": [],
@@ -125,10 +131,37 @@ data:
             "name": "datasource",
             "options": [],
             "query": "prometheus",
+            "queryValue": "",
             "refresh": 1,
             "regex": "",
             "skipUrlSync": false,
             "type": "datasource"
+          },
+          {
+            "current": {
+              "selected": false,
+              "text": "All",
+              "value": "$__all"
+            },
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "definition": "label_values(expiry_hawk_secret_expiry_time,namespace)",
+            "hide": 0,
+            "includeAll": true,
+            "multi": true,
+            "name": "namespace",
+            "options": [],
+            "query": {
+              "query": "label_values(expiry_hawk_secret_expiry_time,namespace)",
+              "refId": "PrometheusVariableQueryEditor-VariableQuery"
+            },
+            "refresh": 2,
+            "regex": "",
+            "skipUrlSync": false,
+            "sort": 1,
+            "type": "query"
           }
         ]
       },
@@ -138,8 +171,8 @@ data:
       },
       "timepicker": {},
       "timezone": "",
-      "title": "Expiry Hawk Example",
-      "uid": "be725e7f-9d54-4f84-b600-8849056ea620",
-      "version": 1,
+      "title": "Expiry Hawk",
+      "uid": "d2f62655-5171-488b-95cc-a28eede97a37",
+      "version": 2,
       "weekStart": ""
     }
