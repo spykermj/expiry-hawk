@@ -46,7 +46,7 @@ data:
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
+                    "color": "red",
                     "value": null
                   },
                   {
@@ -105,7 +105,7 @@ data:
               "interval": "",
               "key": "Q-f3c4d28c-2e3c-4087-8020-1e394bdc8b97-0",
               "legendFormat": "{{`{{name}}`}} affected_url: {{`{{affected_url}}`}}",
-              "range": true,
+              "range": false,
               "refId": "A"
             }
           ],
@@ -172,7 +172,7 @@ data:
       "timepicker": {},
       "timezone": "",
       "title": "Expiry Hawk",
-      "uid": "d2f62655-5171-488b-95cc-a28eede97a37",
+      "uid": "fe776d57-cc0a-48d0-a952-d7bf71a6f2d2",
       "version": 2,
       "weekStart": ""
     }
