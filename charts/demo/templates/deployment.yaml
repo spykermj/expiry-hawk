@@ -3,8 +3,12 @@ kind: Deployment
 metadata:
   name: {{ include "demo.fullname" . }}
   annotations:
-    spykerman.co.uk/secret-rotation-time: {{ now | mustDateModify "1440h" | date "2006-01-02T15:04:05Z" }}
-    spykerman.co.uk/secret-expiry-time: {{ now | mustDateModify "2160h" | date "2006-01-02T15:04:05Z" }}
+    {{- $expiryHours := mul .Values.expiryDays 24 }}
+    {{- $rotateHours := mul ( sub .Values.expiryDays 30 ) 24 }}
+    {{- $expiry := print $expiryHours "h" }}
+    {{- $rotate := print $rotateHours "h" }}
+    spykerman.co.uk/secret-rotation-time: {{ now | mustDateModify $rotate | date "2006-01-02T15:04:05Z" }}
+    spykerman.co.uk/secret-expiry-time: {{ now | mustDateModify $expiry | date "2006-01-02T15:04:05Z" }}
     spykerman.co.uk/secret-affected-url: "https://example.com"
   labels:
     {{- include "demo.labels" . | nindent 4 }}
