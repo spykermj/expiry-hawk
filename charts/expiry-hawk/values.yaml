@@ -5,10 +5,10 @@
 replicaCount: 1
 
 image:
-  repository: jeremyspykerman/expiry-hawk
+  repository: ghcr.io/spykermj/expiry-hawk
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "latest"
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
